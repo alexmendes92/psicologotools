@@ -39,6 +39,18 @@ import {
 const apiKey = process.env.API_KEY || 'AIzaSyDnPfZQAuZP9Hl3S734fvXM1q4UrxhXZ-w';
 const ai = new GoogleGenAI({ apiKey });
 
+// --- Interfaces ---
+
+interface DiagnosisResponse {
+  digital_health_score: number;
+  diagnosis_title: string;
+  anamnesis_summary: string;
+  setting_analysis: string;
+  market_opportunity: string;
+  prescription_steps: string[];
+  urgent_alert: boolean;
+}
+
 // --- Components ---
 
 const GlassCard = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
@@ -328,50 +340,99 @@ const App = () => {
     setResult('');
     setTreatmentPlan('');
 
-    // Prepare data
-    const visualDesc = imageAnalysis ? imageAnalysis.description : "Não informado (Análise Visual Pendente)";
-    const marketDesc = marketAnalysis ? `Alta demanda verificada por ${trendingTerm} na região.` : "Dados de mercado genéricos.";
+    // --- SYSTEM PROMPT (A Personalidade do Dr. Freud Digital) ---
+    const SYSTEM_PROMPT = `
+ATUAR COMO:
+Você é o "Dr. Freud do Marketing Digital". Sua especialidade é analisar a presença digital de psicólogos usando metáforas clínicas e terapêuticas. Seu objetivo é convencer o profissional de que o site dele está "doente" (afastando pacientes) e precisa de "tratamento" (sua consultoria), mas sempre mantendo um tom ético, acolhedor e de autoridade.
+
+ENTRADA DE DADOS (CONTEXTO):
+Você receberá dados técnicos (Infraestrutura), visuais (Semiótica) e de mercado (Tendências).
+
+INSTRUÇÕES DE ANÁLISE:
+1. INFRAESTRUTURA (O CORPO): Se o PageSpeed for baixo (<50), diagnostique como "Lentidão Psicomotora Digital" ou "Resistência ao Vínculo". O paciente desiste antes de entrar.
+2. SEMIÓTICA (O SETTING): Se a análise visual indicar "Frio/Clínico", diagnostique como "Falha no Acolhimento" ou "Ambiente Estéril". Se for "Acolhedor", elogie o "Rapport Visual".
+3. MERCADO (O INCONSCIENTE COLETIVO): Use o termo de tendência (ex: Burnout) para mostrar que existe uma "Demanda Reprimida" na região que ele não está ouvindo.
+
+FORMATO DE SAÍDA (OBRIGATÓRIO JSON):
+Não responda com texto solto. Responda APENAS um objeto JSON com esta estrutura exata:
+{
+  "digital_health_score": number (0-100, baseado na média dos dados),
+  "diagnosis_title": "string (Um título curto e impactante, ex: 'Risco de Ruptura de Vínculo')",
+  "anamnesis_summary": "string (Resumo de 2 linhas focado na dor técnica/velocidade)",
+  "setting_analysis": "string (Análise das cores e imagens. Use termos como 'Transferência' e 'Contratransferência')",
+  "market_opportunity": "string (Texto focado no nicho em alta. Ex: 'Pacientes buscando X e encontrando silêncio')",
+  "prescription_steps": ["string", "string", "string"] (3 passos práticos para resolver),
+  "urgent_alert": boolean (true se score < 50)
+}
+    `;
+
+    // --- DADOS DO PACIENTE ---
+    const technicalContext = `
+    - PageSpeed Score: ${pageSpeedScore}/100
+    - Segurança: ${isSecure ? 'HTTPS Ativo (Seguro)' : 'HTTP (Inseguro - Risco de Quebra de Sigilo)'}
+    - Mobile Friendly: ${mobileFriendly ? 'Sim' : 'Não (Ambiente Hostil)'}
+    `;
+
+    const visualContext = imageAnalysis 
+    ? `Estilo detectado: ${imageAnalysis.style}. Descrição: ${imageAnalysis.description}`
+    : "Não analisado (considere neutro/frio).";
+
+    const marketContext = `
+    - Cidade: ${city}
+    - Nicho em Alta Detectado: ${trendingTerm}
+    - Contexto Adicional: ${marketAnalysis}
+    `;
+
+    const userPrompt = `
+    Analise este paciente (psicólogo):
+    Nome: ${name}
+    URL: ${url}
+    
+    1. DADOS TÉCNICOS: ${technicalContext}
+    2. DADOS VISUAIS: ${visualContext}
+    3. DADOS DE MERCADO: ${marketContext}
+    
+    Gere o JSON de diagnóstico seguindo rigorosamente as instruções do sistema.
+    `;
 
     try {
-      // Using Search Grounding to validate URL context (replacing Web Risk/PageSpeed fetch)
-      const prompt = `
-        ATUAR COMO:
-        Você é um Consultor Sênior de Estratégia Digital (Psicologia).
-
-        TAREFA PRELIMINAR (PESQUISA):
-        Use o Google Search para verificar a presença digital de "${name}" no site "${url}".
-        Verifique se o site parece moderno ou se há reclamações. Use isso para refinar o diagnóstico.
-
-        OBJETIVO DO RELATÓRIO:
-        Criar um "Diagnóstico Clínico Digital" empático.
-
-        DADOS DO PACIENTE:
-        - Nome: ${name}
-        - URL: ${url}
-        - Cidade: ${city || "Não informada"}
-        - Especialidade/Nicho Sugerido: ${trendingTerm}
-
-        METRIFICAÇÃO TÉCNICA (SIMULADA PELO USUÁRIO):
-        1. Infraestrutura: Score ${pageSpeedScore}/100. Segurança: ${isSecure ? 'HTTPS' : 'Não Seguro'}. Mobile: ${mobileFriendly ? 'Bom' : 'Ruim'}.
-        2. Semiótica Visual (Vision AI): ${visualDesc}
-        3. Mercado (Search AI): ${marketDesc}
-
-        GERAR RELATÓRIO EM 5 SEÇÕES (Anamnese, Setting, Inconsciente Coletivo, Prescrição, Bônus Ads).
-        Mantenha o tom terapêutico.
-      `;
-
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: prompt,
+        contents: userPrompt,
         config: {
-          tools: [{ googleSearch: {} }] // Active Grounding
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: "application/json",
+          tools: [{ googleSearch: {} }] // Mantendo o search grounding caso o modelo precise verificar a URL
         }
       });
 
-      setResult(response.text);
+      const diagnosisData: DiagnosisResponse = JSON.parse(response.text.trim());
+
+      // Formatando o JSON de volta para Markdown para exibição no UI existente
+      const formattedResult = `
+## 🩺 ${diagnosisData.diagnosis_title}
+
+**Score de Saúde Digital:** ${diagnosisData.digital_health_score}/100
+${diagnosisData.urgent_alert ? `> ⚠️ **ALERTA CLÍNICO:** Intervenção imediata recomendada.` : ''}
+
+**1. Anamnese (Corpo Digital):**
+${diagnosisData.anamnesis_summary}
+
+**2. Análise do Setting (Semiótica):**
+${diagnosisData.setting_analysis}
+
+**3. Inconsciente Coletivo (Mercado):**
+${diagnosisData.market_opportunity}
+
+**4. Prescrição Terapêutica:**
+${diagnosisData.prescription_steps.map(step => `- ${step}`).join('\n')}
+      `;
+
+      setResult(formattedResult);
+
     } catch (error) {
       console.error(error);
-      setResult("Erro ao gerar diagnóstico. Verifique a conexão com a API.");
+      setResult("Erro ao gerar diagnóstico. Verifique a conexão com a API ou tente novamente.");
     } finally {
       setLoading(false);
     }
